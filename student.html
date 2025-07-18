@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Student Orders</title>
+  <style>
+    body { font-family: sans-serif; margin: 0; background: #f8fafc; }
+    .container { max-width: 400px; margin: 2rem auto; background: #fff; border-radius: 8px; box-shadow: 0 2px 8px #0001; padding: 1.5rem; }
+    h2 { margin-top: 0; }
+    label { display: block; margin: 1rem 0 0.25rem; }
+    input, select, button { width: 100%; padding: 0.5rem; margin-bottom: 1rem; border-radius: 4px; border: 1px solid #ccc; font-size: 1rem; }
+    button { background: #2563eb; color: #fff; border: none; cursor: pointer; }
+    button:active { background: #1d4ed8; }
+    .menu-list { margin: 0.5rem 0 1rem; }
+    .menu-list li { display: flex; justify-content: space-between; }
+    .auth-section { margin-bottom: 1.5rem; }
+    .logout-btn { background: #ef4444; margin-top: 0.5rem; }
+    .error { color: #dc2626; margin-bottom: 1rem; }
+    .order-list { margin: 1rem 0; }
+    .order-item { padding: 0.5rem 0; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; }
+    @media (max-width: 500px) { .container { max-width: 100vw; margin: 0; border-radius: 0; box-shadow: none; } }
+  </style>
+  <!-- Firebase SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <script src="./constants.js"></script>
+</head>
+<body>
+  <div class="container">
+    <button id="logoutBtn" class="logout-btn" style="float:right;">Logout</button>
+    <h2>Today's Menu</h2>
+    <ul class="menu-list" id="menuList">
+      <li>Breakfast <span>₹40 <button class="plus-btn" data-item="Breakfast" data-price="40">+</button></span></li>
+      <li>Chai <span>₹10 <button class="plus-btn" data-item="Chai" data-price="10">+</button></span></li>
+      <li>Snacks <span>₹15 <button class="plus-btn" data-item="Snacks-15" data-price="15">+</button></span> <span>₹20 <button class="plus-btn" data-item="Snacks-20" data-price="20">+</button></span> <span>₹25 <button class="plus-btn" data-item="Snacks-25" data-price="25">+</button></span></li>
+    </ul>
+    <label for="paymentMethod">Payment Method</label>
+    <select id="paymentMethod">
+      <option value="Cash">Cash</option>
+      <option value="UPI">UPI</option>
+      <option value="Pay Later">Pay Later</option>
+    </select>
+    <div id="orderMsg" style="color:green;"></div>
+    <h3>Your Orders</h3>
+    <div class="order-list" id="userOrderList"></div>
+    <div id="dueAmountDisplay" style="margin-bottom:1em;font-weight:bold;"></div>
+    <div id="itemCounts" style="margin-bottom:1em;font-weight:bold;"></div>
+    <div id="cartSummary" style="margin-bottom:1em;font-weight:bold;"></div>
+    <button id="submitOrderBtn" style="display:none;margin-bottom:1em;padding:0.75em 1.5em;background:#2563eb;color:#fff;border:none;border-radius:4px;font-size:1.1em;">Submit Order</button>
+    <!-- UPI Payment Modal -->
+    <div id="upiModal" style="display:none;position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;">
+      <div style="background:#fff;padding:2em;border-radius:8px;max-width:320px;margin:auto;position:relative;">
+        <span id="closeUpiModal" style="position:absolute;top:0.5em;right:1em;cursor:pointer;font-size:1.5em;">&times;</span>
+        <h3>Pay by UPI</h3>
+        <div id="upiQr"></div>
+        <div id="upiAmount" style="margin:1em 0;font-weight:bold;"></div>
+        <button id="upiPayBtn" style="width:100%;padding:0.75em;background:#22c55e;color:#fff;border:none;border-radius:4px;font-size:1.1em;">Pay</button>
+      </div>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+  </div>
+  <script>
+    // --- Firebase Config ---
+    const firebaseConfig = {
+      apiKey: "AIzaSyDQge8MX539oSXM2k5oNKOoDCt1Nnha2oo",
+      authDomain: "chandrettante-mess.firebaseapp.com",
+      projectId: "chandrettante-mess",
+      storageBucket: "chandrettante-mess.firebasestorage.app",
+      messagingSenderId: "284071557490",
+      appId: "1:284071557490:web:f325ae4ce6a3ff246805eb",
+      measurementId: "G-WKYHKV21H6"
+    };
+    if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth();
+    const db = firebase.firestore();
+
+    // --- Logout Logic ---
+    document.getElementById('logoutBtn').onclick = function() {
+      auth.signOut().then(function() {
+        window.location.href = '/';
+      });
+    };
+
+    // --- UI Elements ---
+    const orderForm = document.getElementById('orderForm');
+    const orderMsg = document.getElementById('orderMsg');
+    const userOrderList = document.getElementById('userOrderList');
+
+    // --- Auth State & Orders Fetch ---
+    // Ensure loadUserOrders is called after login
+    auth.onAuthStateChanged(function(user) {
+      if (user) {
+        loadUserOrders(user.email);
+        showDueAmountAndTransactions();
+      }
+    });
+
+    // --- Show Current Due Amount and Total Amount Spent ---
+    async function showDueAmountAndTransactions() {
+      const user = auth.currentUser;
+      if (!user) return;
+      const userRef = db.collection('users').doc(user.uid);
+      let due = 0;
+      let totalAmount = 0;
+      try {
+        const userSnap = await userRef.get();
+        if (userSnap.exists) {
+          due = userSnap.data().dueAmount || 0;
+        }
+        const txSnap = await db.collection('orders').where('userId', '==', user.uid).get();
+        totalAmount = txSnap.docs.reduce((sum, doc) => sum + (doc.data().totalPrice || 0), 0);
+      } catch {}
+      document.getElementById('dueAmountDisplay').textContent = 'Your Due: ₹' + due + ' | Total Spent: ₹' + totalAmount;
+    }
+
+    // --- UPI Modal Logic ---
+    let upiOrderItem = null;
+    let upiOrderPrice = 0;
+    let upiOrderBtn = null;
+    let upiOrderMethod = '';
+    const upiModal = document.getElementById('upiModal');
+    const upiQr = document.getElementById('upiQr');
+    const upiAmount = document.getElementById('upiAmount');
+    const upiPayBtn = document.getElementById('upiPayBtn');
+    const closeUpiModal = document.getElementById('closeUpiModal');
+    // Replace with your UPI ID
+    const UPI_ID = 'yourupiid@okicici';
+    function showUpiModal(item, price, btn) {
+      upiOrderItem = item;
+      upiOrderPrice = price;
+      upiOrderBtn = btn;
+      upiOrderMethod = 'UPI';
+      upiModal.style.display = 'flex';
+      upiQr.innerHTML = '';
+      upiAmount.textContent = 'Amount: ₹' + price;
+      // Generate UPI QR code
+      const upiUrl = `upi://pay?pa=${encodeURIComponent(UPI_ID)}&pn=Canteen&am=${price}&cu=INR`;
+      new QRCode(upiQr, { text: upiUrl, width: 180, height: 180 });
+    }
+    closeUpiModal.onclick = function() { upiModal.style.display = 'none'; };
+    upiPayBtn.onclick = async function() {
+      if (!upiOrderItem || !upiOrderBtn) return;
+      const user = auth.currentUser;
+      if (!user) return;
+      const paymentMethod = 'UPI';
+      const price = upiOrderPrice;
+      const item = upiOrderItem;
+      const userRef = db.collection('users').doc(user.uid);
+      let userData = { dueAmount: 0, maxDueLimit: MAX_DUE_LIMIT };
+      try {
+        const userSnap = await userRef.get();
+        if (userSnap.exists) {
+          userData = Object.assign(userData, userSnap.data());
+        } else {
+          await userRef.set(userData, { merge: true });
+        }
+      } catch (err) {
+        orderMsg.textContent = 'Error checking user due.';
+        orderMsg.style.color = 'red';
+        return;
+      }
+      const order = {
+        userId: user.uid,
+        userEmail: user.email,
+        itemName: item,
+        quantity: 1,
+        status: 'paid',
+        timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+        paymentMethod,
+        price
+      };
+      try {
+        await db.collection('orders').add(order);
+        orderMsg.textContent = 'Order placed and paid by UPI!';
+        orderMsg.style.color = 'green';
+        showDueAmountAndTransactions();
+        setTimeout(() => { orderMsg.textContent = ''; }, 2000);
+      } catch (err) {
+        orderMsg.textContent = 'Error placing order.';
+        orderMsg.style.color = 'red';
+      }
+      upiModal.style.display = 'none';
+    };
+
+    // --- Cart Logic ---
+    const cart = {};
+    const cartSummary = document.getElementById('cartSummary');
+    const submitOrderBtn = document.getElementById('submitOrderBtn');
+    const itemPrices = { Breakfast: 40, Chai: 10, 'Snacks-15': 15, 'Snacks-20': 20, 'Snacks-25': 25 };
+    function updateCartSummary() {
+      let html = '';
+      let total = 0;
+      Object.keys(cart).forEach(item => {
+        if (cart[item] > 0) {
+          html += `${item.replace('Snacks-', 'Snacks (₹')}${item.startsWith('Snacks') ? ')' : ''} × ${cart[item]} | `;
+          total += (itemPrices[item] || 0) * cart[item];
+        }
+      });
+      if (html) {
+        cartSummary.innerHTML = 'Cart: ' + html + 'Total: ₹' + total;
+        submitOrderBtn.style.display = '';
+      } else {
+        cartSummary.innerHTML = '';
+        submitOrderBtn.style.display = 'none';
+      }
+    }
+    // --- Plus Button Logic ---
+    document.querySelectorAll('.plus-btn').forEach(btn => {
+      btn.onclick = function() {
+        const item = btn.getAttribute('data-item');
+        cart[item] = (cart[item] || 0) + 1;
+        updateCartSummary();
+      };
+    });
+    // --- Submit Order Logic ---
+    submitOrderBtn.onclick = async function() {
+      const user = auth.currentUser;
+      if (!user) return;
+      // Check today's active (not done) order count
+      const today = new Date().toISOString().slice(0, 10);
+      const orderSnap = await db.collection('orders')
+        .where('userId', '==', user.uid)
+        .where('timestamp', '>=', new Date(today + 'T00:00:00'))
+        .where('timestamp', '<=', new Date(today + 'T23:59:59'))
+        .get();
+      const activeOrders = orderSnap.docs.filter(doc => doc.data().status !== 'done');
+      if (activeOrders.length >= 2) {
+        orderMsg.textContent = 'You can only have 2 active orders per day.';
+        orderMsg.style.color = 'red';
+        return;
+      }
+      // Prepare items array
+      const items = Object.keys(cart).filter(item => cart[item] > 0).map(item => ({
+        itemName: item,
+        quantity: cart[item],
+        price: itemPrices[item]
+      }));
+      if (items.length === 0) return;
+      const paymentMethod = document.getElementById('paymentMethod').value;
+      const totalPrice = items.reduce((sum, i) => sum + i.price * i.quantity, 0);
+      // Due logic for Pay Later
+      const userRef = db.collection('users').doc(user.uid);
+      let userData = { dueAmount: 0, maxDueLimit: MAX_DUE_LIMIT };
+      try {
+        const userSnap = await userRef.get();
+        if (userSnap.exists) {
+          userData = Object.assign(userData, userSnap.data());
+        } else {
+          await userRef.set(userData, { merge: true });
+        }
+      } catch (err) {
+        orderMsg.textContent = 'Error checking user due.';
+        orderMsg.style.color = 'red';
+        return;
+      }
+      if (paymentMethod === 'Pay Later') {
+        if ((userData.dueAmount || 0) + totalPrice > MAX_DUE_LIMIT) {
+          orderMsg.textContent = 'Due limit exceeded.';
+          orderMsg.style.color = 'red';
+          return;
+        }
+      }
+      // UPI modal for UPI
+      if (paymentMethod === 'UPI') {
+        showUpiModalCart(items, totalPrice);
+        return;
+      }
+      // Place order
+      const order = {
+        userId: user.uid,
+        userEmail: user.email,
+        items,
+        status: paymentMethod === 'UPI' ? 'paid' : 'pending',
+        timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+        paymentMethod,
+        totalPrice
+      };
+      try {
+        await db.collection('orders').add(order);
+        if (paymentMethod === 'Pay Later') {
+          await userRef.set({ dueAmount: (userData.dueAmount || 0) + totalPrice, maxDueLimit: userData.maxDueLimit || MAX_DUE_LIMIT }, { merge: true });
+        }
+        showDueAmountAndTransactions();
+        orderMsg.textContent = 'Order placed!';
+        orderMsg.style.color = 'green';
+        setTimeout(() => { orderMsg.textContent = ''; }, 2000);
+        // Clear cart
+        Object.keys(cart).forEach(k => cart[k] = 0);
+        updateCartSummary();
+      } catch (err) {
+        orderMsg.textContent = 'Error placing order.';
+        orderMsg.style.color = 'red';
+      }
+    };
+    // --- UPI Modal for Cart ---
+    function showUpiModalCart(items, totalPrice) {
+      upiModal.style.display = 'flex';
+      upiQr.innerHTML = '';
+      upiAmount.textContent = 'Amount: ₹' + totalPrice;
+      const upiUrl = `upi://pay?pa=${encodeURIComponent(UPI_ID)}&pn=Canteen&am=${totalPrice}&cu=INR`;
+      new QRCode(upiQr, { text: upiUrl, width: 180, height: 180 });
+      upiPayBtn.onclick = async function() {
+        const user = auth.currentUser;
+        if (!user) return;
+        const userRef = db.collection('users').doc(user.uid);
+        let userData = { dueAmount: 0, maxDueLimit: MAX_DUE_LIMIT };
+        try {
+          const userSnap = await userRef.get();
+          if (userSnap.exists) {
+            userData = Object.assign(userData, userSnap.data());
+          } else {
+            await userRef.set(userData, { merge: true });
+          }
+        } catch (err) {
+          orderMsg.textContent = 'Error checking user due.';
+          orderMsg.style.color = 'red';
+          return;
+        }
+        const order = {
+          userId: user.uid,
+          userEmail: user.email,
+          items,
+          status: 'paid',
+          timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+          paymentMethod: 'UPI',
+          totalPrice
+        };
+        try {
+          await db.collection('orders').add(order);
+          showDueAmountAndTransactions();
+          orderMsg.textContent = 'Order placed and paid by UPI!';
+          orderMsg.style.color = 'green';
+          setTimeout(() => { orderMsg.textContent = ''; }, 2000);
+          // Clear cart
+          Object.keys(cart).forEach(k => cart[k] = 0);
+          updateCartSummary();
+        } catch (err) {
+          orderMsg.textContent = 'Error placing order.';
+          orderMsg.style.color = 'red';
+        }
+        upiModal.style.display = 'none';
+      };
+    }
+
+    // --- Show Current User's Orders (Real-time) ---
+    function loadUserOrders(email) {
+      const userOrderList = document.getElementById('userOrderList');
+      if (!userOrderList) return;
+      userOrderList.innerHTML = '<i>Loading...</i>';
+      // Remove previous listener if any
+      if (window._userOrdersUnsub) window._userOrdersUnsub();
+      window._userOrdersUnsub = db.collection('orders')
+        .where('userEmail', '==', email)
+        .orderBy('timestamp', 'desc')
+        .onSnapshot(snap => {
+          if (snap.empty) {
+            userOrderList.innerHTML = '<i>No orders found.</i>';
+            return;
+          }
+          let html = '';
+          snap.forEach(doc => {
+            const order = doc.data();
+            if (order.items && Array.isArray(order.items)) {
+              order.items.forEach(item => {
+                if (item && item.itemName) {
+                  html += `<div class="order-item"><span>${item.itemName.replace('Snacks-', 'Snacks (₹')}${item.itemName.startsWith('Snacks') ? ')' : ''}</span><span>${item.quantity} × ₹${item.price}</span><span>${order.status || 'pending'}</span></div>`;
+                }
+              });
+            } else if (order.itemName) {
+              html += `<div class="order-item"><span>${order.itemName.replace('Snacks-', 'Snacks (₹')}${order.itemName.startsWith('Snacks') ? ')' : ''}</span><span>${order.quantity}</span><span>${order.status || 'pending'}</span></div>`;
+            }
+          });
+          userOrderList.innerHTML = html;
+        }, err => {
+          userOrderList.innerHTML = '<i>Error loading orders: ' + err.message + '</i>';
+          console.error('Error loading orders:', err);
+        });
+    }
+
+    // --- Show Item Counts (All Students, Real-time) ---
+    function showItemCounts() {
+      const itemCountsDiv = document.getElementById('itemCounts');
+      if (!itemCountsDiv) return;
+      if (window._itemCountsUnsub) window._itemCountsUnsub();
+      window._itemCountsUnsub = db.collection('orders').onSnapshot(snap => {
+        const counts = { Breakfast: 0, Chai: 0, 'Snacks-15': 0, 'Snacks-20': 0, 'Snacks-25': 0 };
+        snap.forEach(doc => {
+          const order = doc.data();
+          if (order.items && Array.isArray(order.items)) {
+            order.items.forEach(item => {
+              if (item && counts.hasOwnProperty(item.itemName)) {
+                counts[item.itemName] += item.quantity || 1;
+              }
+            });
+          } else if (counts.hasOwnProperty(order.itemName)) {
+            counts[order.itemName] += order.quantity || 1;
+          }
+        });
+        itemCountsDiv.innerHTML =
+          `Breakfast: ${counts.Breakfast} | Chai: ${counts.Chai} | Snacks (₹15): ${counts['Snacks-15']} | Snacks (₹20): ${counts['Snacks-20']} | Snacks (₹25): ${counts['Snacks-25']}`;
+      });
+    }
+    showItemCounts();
+  </script>
+</body>
+</html> 

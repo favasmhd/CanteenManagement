@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Login</title>
+  <style>
+    body { font-family: sans-serif; margin: 0; background: #f8fafc; }
+    .container { max-width: 400px; margin: 2rem auto; background: #fff; border-radius: 8px; box-shadow: 0 2px 8px #0001; padding: 1.5rem; }
+    h2 { margin-top: 0; }
+    label { display: block; margin: 1rem 0 0.25rem; }
+    input, button { width: 100%; padding: 0.5rem; margin-bottom: 1rem; border-radius: 4px; border: 1px solid #ccc; font-size: 1rem; }
+    button { background: #2563eb; color: #fff; border: none; cursor: pointer; }
+    button:active { background: #1d4ed8; }
+    .error { color: #dc2626; margin-bottom: 1rem; }
+    @media (max-width: 500px) { .container { max-width: 100vw; margin: 0; border-radius: 0; box-shadow: none; } }
+  </style>
+  <!-- Firebase SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+</head>
+<body>
+  <div class="container">
+    <h2>Login</h2>
+    <form id="loginForm">
+      <label for="email">Email</label>
+      <input type="email" id="email" required autocomplete="username" />
+      <label for="password">Password</label>
+      <input type="password" id="password" required autocomplete="current-password" />
+      <button type="submit">Login</button>
+      <div class="error" id="errorMsg"></div>
+    </form>
+  </div>
+  <script>
+    // --- Firebase Config ---
+    const firebaseConfig = {
+      apiKey: "AIzaSyDQge8MX539oSXM2k5oNKOoDCt1Nnha2oo",
+      authDomain: "chandrettante-mess.firebaseapp.com",
+      projectId: "chandrettante-mess",
+      storageBucket: "chandrettante-mess.firebasestorage.app",
+      messagingSenderId: "284071557490",
+      appId: "1:284071557490:web:f325ae4ce6a3ff246805eb",
+      measurementId: "G-WKYHKV21H6"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth();
+    const db = firebase.firestore();
+
+    // --- UI Elements ---
+    const loginForm = document.getElementById('loginForm');
+    const errorMsg = document.getElementById('errorMsg');
+
+    // --- Login Logic ---
+    loginForm.onsubmit = async function(e) {
+      e.preventDefault();
+      errorMsg.textContent = '';
+      const email = document.getElementById('email').value.trim();
+      const password = document.getElementById('password').value;
+      try {
+        const userCredential = await auth.signInWithEmailAndPassword(email, password);
+        const user = userCredential.user;
+        // Fetch role from Firestore (roles collection, doc ID = user.email)
+        db.collection('roles').doc(user.email).get()
+          .then(function(doc) {
+            if (doc.exists) {
+              var role = doc.data().role;
+              if (role === "student") {
+                window.location.href = "student.html";
+              } else if (role === "canteen") {
+                window.location.href = "canteen.html";
+              } else if (role === "admin") {
+                window.location.href = "admin.html";
+              } else {
+                alert("No valid role found for this user.");
+              }
+            } else {
+              alert("No role found for this user.");
+            }
+          })
+          .catch(function(error) {
+            alert("Error fetching role: " + error.message);
+          });
+      } catch (err) {
+        errorMsg.textContent = err.message;
+      }
+    };
+  </script>
+</body>
+</html> 

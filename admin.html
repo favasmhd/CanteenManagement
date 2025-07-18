@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin Orders</title>
+  <style>
+    body { font-family: sans-serif; margin: 0; background: #f8fafc; }
+    .container { max-width: 600px; margin: 2rem auto; background: #fff; border-radius: 8px; box-shadow: 0 2px 8px #0001; padding: 1.5rem; }
+    h2 { margin-top: 0; }
+    .logout-btn { background: #ef4444; color: #fff; border: none; border-radius: 4px; padding: 0.5rem 1rem; float: right; margin-bottom: 1rem; cursor: pointer; }
+    .order-list { margin: 1rem 0; }
+    .order-item { padding: 0.5rem 0; border-bottom: 1px solid #eee; display: flex; align-items: center; justify-content: space-between; }
+    .order-info { flex: 1; }
+    .delete-btn { background: #ef4444; color: #fff; border: none; border-radius: 4px; padding: 0.3rem 0.8rem; cursor: pointer; margin-left: 1rem; }
+    .delete-btn:active { background: #b91c1c; }
+    .access-denied { color: #dc2626; font-weight: bold; text-align: center; margin-top: 2rem; }
+    @media (max-width: 700px) { .container { max-width: 100vw; margin: 0; border-radius: 0; box-shadow: none; } }
+  </style>
+  <!-- Firebase SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+</head>
+<body>
+  <div class="container">
+    <button id="logoutBtn" class="logout-btn">Logout</button>
+    <h2>Admin Orders</h2>
+    <button id="deleteAllBtn" style="background:#ef4444;color:#fff;border:none;border-radius:4px;padding:0.5rem 1rem;margin-bottom:1rem;cursor:pointer;">Delete All</button>
+    <div class="order-list" id="adminOrderList"></div>
+    <div class="access-denied" id="accessDenied" style="display:none;">Access Denied: You are not an admin.</div>
+  </div>
+  <script>
+    // --- Firebase Config ---
+    const firebaseConfig = {
+      apiKey: "AIzaSyDQge8MX539oSXM2k5oNKOoDCt1Nnha2oo",
+      authDomain: "chandrettante-mess.firebaseapp.com",
+      projectId: "chandrettante-mess",
+      storageBucket: "chandrettante-mess.firebasestorage.app",
+      messagingSenderId: "284071557490",
+      appId: "1:284071557490:web:f325ae4ce6a3ff246805eb",
+      measurementId: "G-WKYHKV21H6"
+    };
+    if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth();
+    const db = firebase.firestore();
+
+    const logoutBtn = document.getElementById('logoutBtn');
+    const adminOrderList = document.getElementById('adminOrderList');
+    const accessDenied = document.getElementById('accessDenied');
+    const deleteAllBtn = document.getElementById('deleteAllBtn');
+
+    logoutBtn.onclick = function() {
+      auth.signOut().then(function() {
+        window.location.href = '/';
+      });
+    };
+
+    auth.onAuthStateChanged(function(user) {
+      if (user) {
+        if (user.email === 'admin@example.com') {
+          accessDenied.style.display = 'none';
+          adminOrderList.style.display = '';
+          loadAdminOrders();
+        } else {
+          accessDenied.style.display = '';
+          adminOrderList.style.display = 'none';
+        }
+      } else {
+        window.location.href = '/';
+      }
+    });
+
+    deleteAllBtn.onclick = async function() {
+      if (confirm('Are you sure you want to delete ALL orders? This cannot be undone.')) {
+        try {
+          const snap = await db.collection('orders').get();
+          const batch = db.batch();
+          snap.forEach(doc => {
+            batch.delete(doc.ref);
+          });
+          // Also reset dueAmount for all users
+          const usersSnap = await db.collection('users').get();
+          usersSnap.forEach(userDoc => {
+            batch.set(userDoc.ref, { dueAmount: 0 }, { merge: true });
+          });
+          await batch.commit();
+          loadAdminOrders();
+        } catch (err) {
+          alert('Error deleting all orders: ' + err.message);
+        }
+      }
+    };
+
+    async function loadAdminOrders() {
+      adminOrderList.innerHTML = '<i>Loading...</i>';
+      try {
+        let q = db.collection('orders').orderBy('timestamp', 'desc');
+        const snap = await q.get();
+        if (snap.empty) {
+          adminOrderList.innerHTML = '<i>No orders found.</i>';
+          return;
+        }
+        let html = '';
+        snap.forEach(doc => {
+          const order = doc.data();
+          html += `<div class="order-item">
+            <div class="order-info">
+              <b>${order.itemName ? order.itemName.replace('Snacks-', 'Snacks (₹') : ''}${order.itemName && order.itemName.startsWith('Snacks') ? ')' : ''}</b> × ${order.quantity || 1}<br>
+              <small>${order.userEmail || order.studentEmail || ''}</small> | <small>${order.status || 'pending'}</small> | <small>${order.paymentMethod || ''}</small> | <small>${order.timestamp && order.timestamp.toDate ? order.timestamp.toDate().toLocaleString() : ''}</small>
+            </div>
+            <button class="delete-btn" data-id="${doc.id}">Delete</button>
+          </div>`;
+        });
+        adminOrderList.innerHTML = html;
+        // Add event listeners for delete buttons
+        document.querySelectorAll('.delete-btn').forEach(btn => {
+          btn.onclick = async function() {
+            const id = btn.getAttribute('data-id');
+            if (confirm('Are you sure you want to delete this order?')) {
+              await db.collection('orders').doc(id).delete();
+              loadAdminOrders();
+            }
+          };
+        });
+      } catch (err) {
+        adminOrderList.innerHTML = '<i>Error loading orders: ' + err.message + '</i>';
+        console.error('Error loading admin orders:', err);
+      }
+    }
+  </script>
+</body>
+</html> 

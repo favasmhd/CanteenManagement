@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Canteen Orders</title>
+  <style>
+    body { font-family: sans-serif; margin: 0; background: #f8fafc; }
+    .container { max-width: 400px; margin: 2rem auto; background: #fff; border-radius: 8px; box-shadow: 0 2px 8px #0001; padding: 1.5rem; }
+    h2 { margin-top: 0; }
+    label { display: block; margin: 1rem 0 0.25rem; }
+    input, select, button { width: 100%; padding: 0.5rem; margin-bottom: 1rem; border-radius: 4px; border: 1px solid #ccc; font-size: 1rem; }
+    button { background: #2563eb; color: #fff; border: none; cursor: pointer; }
+    button:active { background: #1d4ed8; }
+    .tabs { display: flex; margin-bottom: 1rem; }
+    .tab { flex: 1; padding: 0.75rem; text-align: center; cursor: pointer; border-bottom: 2px solid #e5e7eb; }
+    .tab.active { border-bottom: 2px solid #2563eb; font-weight: bold; color: #2563eb; }
+    .order-list { margin: 1rem 0; }
+    .order-item { padding: 0.5rem 0; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; }
+    .totals { margin-top: 1rem; background: #f1f5f9; padding: 0.5rem; border-radius: 4px; }
+    .auth-section { margin-bottom: 1.5rem; }
+    .logout-btn { background: #ef4444; margin-top: 0.5rem; }
+    .error { color: #dc2626; margin-bottom: 1rem; }
+    .filter-row { margin-bottom: 1rem; }
+    .order-info { flex-grow: 1; }
+    .complete-btn { background: #4f46e5; color: #fff; padding: 0.25rem 0.75rem; border-radius: 4px; border: none; cursor: pointer; font-size: 0.875rem; }
+    .complete-btn:active { background: #4338ca; }
+    @media (max-width: 500px) { .container { max-width: 100vw; margin: 0; border-radius: 0; box-shadow: none; } }
+  </style>
+  <!-- Firebase SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <script src="./constants.js"></script>
+</head>
+<body>
+  <div class="container">
+    <div class="header-bar" style="display:flex; align-items:center; justify-content:space-between; margin-bottom:0.5rem;">
+      <div></div>
+      <button id="logoutBtn" class="logout-btn">Logout</button>
+    </div>
+    <div class="tabs" style="display:flex; margin-bottom:1rem; border-bottom:1.5px solid #e5e7eb;">
+      <div class="tab active" id="canteenTab" style="flex:1; text-align:center; cursor:pointer; padding:0.75rem; border-bottom:2px solid #2563eb; font-weight:bold; color:#2563eb;">Canteen</div>
+      <div class="tab" id="duesTab" style="flex:1; text-align:center; cursor:pointer; padding:0.75rem; border-bottom:2px solid #e5e7eb;">Dues</div>
+    </div>
+    <div id="canteenView">
+      <div id="canteenItemCounts" style="margin-bottom:1em;font-weight:bold;"></div>
+      <div id="canteenTotalTx" style="margin-bottom:1em;font-weight:bold;"></div>
+      <div style="margin-bottom:1rem;">
+        <label for="itemFilter">Filter by Item: </label>
+        <select id="itemFilter">
+          <option value="">All</option>
+          <option value="Breakfast">Breakfast</option>
+          <option value="Chappathi">Chappathi</option>
+          <option value="Chai">Chai</option>
+          <option value="Snacks-15">Snacks (₹15)</option>
+          <option value="Snacks-20">Snacks (₹20)</option>
+          <option value="Snacks-25">Snacks (₹25)</option>
+        </select>
+        <button id="groupBtn" style="margin-left:1em;">Group Pending</button>
+      </div>
+      <h2>Canteen Orders</h2>
+      <div class="order-list" id="orderList"></div>
+      <div class="totals" id="totals"></div>
+    </div>
+    <div id="duesView" style="display:none;">
+      <h2 style="color:#2563eb;">User Dues</h2>
+      <input type="text" id="duesSearch" placeholder="Search by email or name..." style="width:100%;margin-bottom:1em;padding:0.5em;font-size:1.1em;" />
+      <div class="order-list" id="duesList"></div>
+    </div>
+    <div id="adminView" style="display:none;">
+      <h2>Admin Orders</h2>
+      <div class="order-list" id="adminOrderList"></div>
+    </div>
+  </div>
+  <script>
+    // ---- Firebase Config ----
+    const firebaseConfig = {
+      apiKey: "AIzaSyDQge8MX539oSXM2k5oNKOoDCt1Nnha2oo",
+      authDomain: "chandrettante-mess.firebaseapp.com",
+      projectId: "chandrettante-mess",
+      storageBucket: "chandrettante-mess.firebasestorage.app",
+      messagingSenderId: "284071557490",
+      appId: "1:284071557490:web:f325ae4ce6a3ff246805eb",
+      measurementId: "G-WKYHKV21H6"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth();
+    const db = firebase.firestore();
+
+    // ---- UI Elements ----
+    const authSection = document.getElementById('authSection');
+    const loginForm = document.getElementById('loginForm');
+    const authError = document.getElementById('authError');
+    const adminTab = document.getElementById('adminTab');
+    const orderList = document.getElementById('orderList');
+    const totalsDiv = document.getElementById('totals');
+    const filterType = document.getElementById('filterType'); // This element is no longer used for filtering
+    const statusFilter = document.getElementById('statusFilter');
+    const itemFilter = document.getElementById('itemFilter');
+    const groupBtn = document.getElementById('groupBtn');
+    let groupedMode = false;
+    const duesList = document.getElementById('duesList');
+    const duesSearch = document.getElementById('duesSearch');
+
+    // ---- Auth Logic ----
+    function showCanteenView() {
+      authSection.style.display = 'none';
+      canteenView.style.display = '';
+    }
+    function showAuth() {
+      authSection.style.display = '';
+      canteenView.style.display = 'none';
+    }
+    auth.onAuthStateChanged(user => {
+      if (user) {
+        showCanteenView();
+        loadOrders(); // Changed from listenOrders to loadOrders
+      } else {
+        showAuth();
+      }
+    });
+    // --- Logout Logic ---
+    // Show/hide logout button
+    auth.onAuthStateChanged(user => {
+      const logoutBtn = document.getElementById('logoutBtn');
+      if (logoutBtn) {
+        logoutBtn.style.display = user ? '' : 'none';
+      }
+    });
+
+    // ---- Canteen Real-time Orders ----
+    // Removed listenOrders function
+
+    // --- Load Orders ---
+    itemFilter.onchange = () => { groupedMode = false; loadOrders(); };
+    groupBtn.onclick = () => { groupedMode = true; loadOrders(); };
+
+    async function loadOrders() {
+      // Show total amount
+      try {
+        const txSnap = await db.collection('orders').get();
+        const totalAmount = txSnap.docs.reduce((sum, doc) => sum + (doc.data().price || 0), 0);
+        document.getElementById('canteenTotalTx').textContent = 'Total Amount: ₹' + totalAmount;
+      } catch { document.getElementById('canteenTotalTx').textContent = ''; }
+      orderList.innerHTML = '<i>Loading...</i>';
+      try {
+        let q = db.collection('orders').orderBy('timestamp', 'desc');
+        const snap = await q.get();
+        if (snap.empty) {
+          orderList.innerHTML = '<i>No orders found.</i>';
+          return;
+        }
+        const filterItem = itemFilter.value;
+        if (groupedMode) {
+          // Group pending orders by itemName
+          const grouped = {};
+          snap.forEach(doc => {
+            const order = doc.data();
+            const status = order.status || 'pending';
+            if (status !== 'pending') return;
+            if (filterItem && order.itemName !== filterItem) return;
+            const item = order.itemName || 'Unknown';
+            if (!grouped[item]) grouped[item] = 0;
+            grouped[item] += order.quantity || 1;
+          });
+          let html = '';
+          const items = Object.keys(grouped);
+          if (items.length === 0) {
+            orderList.innerHTML = '<i>No pending orders found.</i>';
+            return;
+          }
+          items.forEach(item => {
+            html += `<div class="order-item"><div class="order-info"><b>${item.replace('Snacks-', 'Snacks (₹')}${item.startsWith('Snacks') ? ')' : ''}</b>: ${grouped[item]}</div></div>`;
+          });
+          orderList.innerHTML = html;
+          return;
+        }
+        // Show all orders, filter by item if needed
+        let html = '';
+        snap.forEach(doc => {
+          const order = doc.data();
+          if (filterItem && order.itemName !== filterItem) return;
+          const status = order.status || 'pending';
+          let doneText = status === 'done' ? '<span style="color:green;">Done</span>' : '';
+          let paidText = status === 'paid' ? '<span style="color:green;">Paid</span>' : '';
+          let markDoneBtn = status !== 'done' ? `<button class='mark-done-btn' data-id='${doc.id}'>Mark Done</button>` : '';
+          let markPaidBtn = (order.paymentMethod === 'Cash' && status !== 'paid') ? `<button class='mark-paid-btn' data-id='${doc.id}'>Mark as Paid</button>` : '';
+          html += `<div class="order-item">
+            <div class="order-info">
+              <b>${order.itemName ? order.itemName.replace('Snacks-', 'Snacks (₹') : ''}${order.itemName && order.itemName.startsWith('Snacks') ? ')' : ''}</b> × ${order.quantity || 1}<br>
+              <small>${order.userEmail || ''}</small> | <small>${status}</small> | <small>${order.paymentMethod || ''}</small>
+            </div>
+            ${doneText} ${paidText} ${markDoneBtn} ${markPaidBtn}
+          </div>`;
+        });
+        orderList.innerHTML = html || '<i>No orders found.</i>';
+        // Add event listeners for mark done buttons
+        document.querySelectorAll('.mark-done-btn').forEach(btn => {
+          btn.onclick = async function() {
+            const id = btn.getAttribute('data-id');
+            btn.disabled = true;
+            await db.collection('orders').doc(id).update({ status: 'done' });
+            loadOrders();
+          };
+        });
+        // Add event listeners for mark paid buttons
+        document.querySelectorAll('.mark-paid-btn').forEach(btn => {
+          btn.onclick = async function() {
+            const id = btn.getAttribute('data-id');
+            btn.disabled = true;
+            await db.collection('orders').doc(id).update({ status: 'paid' });
+            loadOrders();
+          };
+        });
+      } catch (err) {
+        orderList.innerHTML = '<i>Error loading orders: ' + err.message + '</i>';
+        console.error('Error loading orders:', err);
+      }
+    }
+
+    // --- Tab Logic ---
+    // --- Robust Tab and Logout Event Listeners ---
+    const canteenTab = document.getElementById('canteenTab');
+    const duesTab = document.getElementById('duesTab');
+    const canteenView = document.getElementById('canteenView');
+    const duesView = document.getElementById('duesView');
+    const logoutBtn = document.getElementById('logoutBtn');
+
+    if (canteenTab && duesTab && canteenView && duesView) {
+      canteenTab.onclick = function() {
+        canteenTab.classList.add('active');
+        duesTab.classList.remove('active');
+        if (canteenView) canteenView.style.display = '';
+        if (duesView) duesView.style.display = 'none';
+        loadOrders();
+      };
+      duesTab.onclick = function() {
+        duesTab.classList.add('active');
+        canteenTab.classList.remove('active');
+        if (canteenView) canteenView.style.display = 'none';
+        if (duesView) duesView.style.display = '';
+        loadDues();
+      };
+    }
+    if (logoutBtn) {
+      logoutBtn.onclick = function() {
+        auth.signOut().then(function() {
+          window.location.href = '/';
+        });
+      };
+    }
+
+    // --- Auth State & Access Control ---
+    auth.onAuthStateChanged(function(user) {
+      if (user) {
+        // Always show both tabs for canteen and admin users
+        duesTab.style.display = '';
+        canteenTab.style.display = '';
+        canteenTab.classList.add('active');
+        duesTab.classList.remove('active');
+        canteenView.style.display = '';
+        duesView.style.display = 'none';
+        loadOrders();
+      } else {
+        window.location.href = '/';
+      }
+    });
+
+    // --- Admin Orders List ---
+    async function loadAdminOrders() {
+      adminOrderList.innerHTML = '<i>Loading...</i>';
+      try {
+        let q = db.collection('orders').orderBy('timestamp', 'desc');
+        const snap = await q.get();
+        if (snap.empty) {
+          adminOrderList.innerHTML = '<i>No orders found.</i>';
+          return;
+        }
+        let html = '';
+        snap.forEach(doc => {
+          const order = doc.data();
+          html += `<div class="order-item">
+            <div class="order-info">
+              <b>${order.itemName ? order.itemName.replace('Snacks-', 'Snacks (₹') : ''}${order.itemName && order.itemName.startsWith('Snacks') ? ')' : ''}</b> × ${order.quantity || 1}<br>
+              <small>${order.userEmail || order.studentEmail || ''}</small> | <small>${order.status || 'pending'}</small> | <small>${order.paymentMethod || ''}</small> | <small>${order.timestamp && order.timestamp.toDate ? order.timestamp.toDate().toLocaleString() : ''}</small>
+            </div>
+            <button class="delete-btn" data-id="${doc.id}">Delete</button>
+          </div>`;
+        });
+        adminOrderList.innerHTML = html;
+        // Add event listeners for delete buttons
+        document.querySelectorAll('.delete-btn').forEach(btn => {
+          btn.onclick = async function() {
+            const id = btn.getAttribute('data-id');
+            if (confirm('Are you sure you want to delete this order?')) {
+              await db.collection('orders').doc(id).delete();
+              loadAdminOrders();
+            }
+          };
+        });
+      } catch (err) {
+        adminOrderList.innerHTML = '<i>Error loading orders: ' + err.message + '</i>';
+        console.error('Error loading admin orders:', err);
+      }
+    }
+
+    // --- Load Dues ---
+    async function loadDues() {
+      duesList.innerHTML = '<i>Loading...</i>';
+      try {
+        let q = db.collection('users').where('dueAmount', '>', 0);
+        const snap = await q.get();
+        if (snap.empty) {
+          duesList.innerHTML = '<i>No dues found.</i>';
+          return;
+        }
+        let html = '';
+        const search = duesSearch.value.trim().toLowerCase();
+        snap.forEach(doc => {
+          const user = doc.data();
+          const email = user.email || user.userEmail || '';
+          const name = user.name || '';
+          if (search && !email.toLowerCase().includes(search) && !name.toLowerCase().includes(search)) return;
+          html += `<div class="order-item" style="background:#f1f5f9;">
+            <div class="order-info">
+              <b>${name ? name : '(No Name)'}</b> <span style='color:#888;'>${email ? `| ${email}` : ''}</span> | <span style="color:#b91c1c;">Due: ₹${user.dueAmount || 0}</span>
+              <input type='number' min='0' max='${user.dueAmount || 0}' value='${user.dueAmount || 0}' class='reduce-due-input' data-id='${doc.id}' style='width:5em;margin-left:1em;' />
+              <button class="mark-paid-btn" data-id="${doc.id}" style="background:#22c55e;">Update</button>
+            </div>
+          </div>`;
+        });
+        duesList.innerHTML = html || '<i>No dues found.</i>';
+        // Add event listeners for mark paid buttons
+        document.querySelectorAll('.mark-paid-btn').forEach(btn => {
+          btn.onclick = async function() {
+            const id = btn.getAttribute('data-id');
+            const input = document.querySelector(`.reduce-due-input[data-id='${id}']`);
+            const newDue = parseInt(input.value, 10) || 0;
+            await db.collection('users').doc(id).set({ dueAmount: newDue }, { merge: true });
+            loadDues();
+          };
+        });
+      } catch (err) {
+        duesList.innerHTML = '<i>Error loading dues: ' + err.message + '</i>';
+        console.error('Error loading dues:', err);
+      }
+    }
+    duesSearch.oninput = loadDues;
+
+    // --- Show Item Counts (All Students, Real-time) in Canteen ---
+    function showCanteenItemCounts() {
+      const itemCountsDiv = document.getElementById('canteenItemCounts');
+      if (!itemCountsDiv) return;
+      if (window._canteenItemCountsUnsub) window._canteenItemCountsUnsub();
+      window._canteenItemCountsUnsub = db.collection('orders').onSnapshot(snap => {
+        const counts = { Breakfast: 0, Chai: 0, 'Snacks-15': 0, 'Snacks-20': 0, 'Snacks-25': 0 };
+        snap.forEach(doc => {
+          const order = doc.data();
+          if (order.items && Array.isArray(order.items)) {
+            order.items.forEach(item => {
+              if (item && counts.hasOwnProperty(item.itemName)) {
+                counts[item.itemName] += item.quantity || 1;
+              }
+            });
+          } else if (counts.hasOwnProperty(order.itemName)) {
+            counts[order.itemName] += order.quantity || 1;
+          }
+        });
+        itemCountsDiv.innerHTML =
+          `Breakfast: ${counts.Breakfast} | Chai: ${counts.Chai} | Snacks (₹15): ${counts['Snacks-15']} | Snacks (₹20): ${counts['Snacks-20']} | Snacks (₹25): ${counts['Snacks-25']}`;
+      });
+    }
+    showCanteenItemCounts();
+  </script>
+</body>
+</html> 
