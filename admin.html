@@ -108,6 +108,7 @@
             <div class="order-info">
               <b>${order.itemName ? order.itemName.replace('Snacks-', 'Snacks (₹') : ''}${order.itemName && order.itemName.startsWith('Snacks') ? ')' : ''}</b> × ${order.quantity || 1}<br>
               <small>${order.userEmail || order.studentEmail || ''}</small> | <small>${order.status || 'pending'}</small> | <small>${order.paymentMethod || ''}</small> | <small>${order.timestamp && order.timestamp.toDate ? order.timestamp.toDate().toLocaleString() : ''}</small>
+              ${order.paid ? '<span style="color:green;">Paid</span>' : ''} ${order.done ? '<span style="color:green;">Done</span>' : ''}
             </div>
             <button class="delete-btn" data-id="${doc.id}">Delete</button>
           </div>`;
