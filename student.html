@@ -47,6 +47,7 @@
     <div class="order-list" id="userOrderList"></div>
     <div id="dueAmountDisplay" style="margin-bottom:1em;font-weight:bold;"></div>
     <div id="itemCounts" style="margin-bottom:1em;font-weight:bold;"></div>
+    <div id="orderLimitMsg" style="margin-bottom:1em;color:#dc2626;font-weight:bold;"></div>
     <div id="cartSummary" style="margin-bottom:1em;font-weight:bold;"></div>
     <button id="submitOrderBtn" style="display:none;margin-bottom:1em;padding:0.75em 1.5em;background:#2563eb;color:#fff;border:none;border-radius:4px;font-size:1.1em;">Submit Order</button>
     <!-- UPI Payment Modal -->
@@ -109,8 +110,26 @@
         if (userSnap.exists) {
           due = userSnap.data().dueAmount || 0;
         }
-        const txSnap = await db.collection('orders').where('userId', '==', user.uid).get();
-        totalAmount = txSnap.docs.reduce((sum, doc) => sum + (doc.data().totalPrice || 0), 0);
+        // Query all orders for this user (userId or userEmail matches email)
+        const txSnap = await db.collection('orders')
+          .where('userEmail', '==', user.email).get();
+        const txSnap2 = await db.collection('orders')
+          .where('userId', '==', user.email).get();
+        const allDocs = [...txSnap.docs, ...txSnap2.docs];
+        const seen = new Set();
+        totalAmount = allDocs.reduce((sum, doc) => {
+          if (seen.has(doc.id)) return sum; // avoid double-counting
+          seen.add(doc.id);
+          const order = doc.data();
+          if (order.items && Array.isArray(order.items)) {
+            return sum + order.items.reduce((s, item) => s + (item.price || 0) * (item.quantity || 1), 0);
+          } else if (order.price && order.quantity) {
+            return sum + order.price * order.quantity;
+          } else if (order.totalPrice) {
+            return sum + order.totalPrice;
+          }
+          return sum;
+        }, 0);
       } catch {}
       document.getElementById('dueAmountDisplay').textContent = 'Your Due: ₹' + due + ' | Total Spent: ₹' + totalAmount;
     }
@@ -188,6 +207,7 @@
     const cart = {};
     const cartSummary = document.getElementById('cartSummary');
     const submitOrderBtn = document.getElementById('submitOrderBtn');
+    const orderLimitMsg = document.getElementById('orderLimitMsg');
     const itemPrices = { Breakfast: 40, Chai: 10, 'Snacks-15': 15, 'Snacks-20': 20, 'Snacks-25': 25 };
     function updateCartSummary() {
       let html = '';
@@ -218,18 +238,44 @@
     submitOrderBtn.onclick = async function() {
       const user = auth.currentUser;
       if (!user) return;
-      // Check today's active (not done) order count
+      // Check today's active (not done) meal count
       const today = new Date().toISOString().slice(0, 10);
+      // Query both userId and userEmail for today's orders
       const orderSnap = await db.collection('orders')
-        .where('userId', '==', user.uid)
+        .where('userEmail', '==', user.email)
         .where('timestamp', '>=', new Date(today + 'T00:00:00'))
         .where('timestamp', '<=', new Date(today + 'T23:59:59'))
         .get();
-      const activeOrders = orderSnap.docs.filter(doc => doc.data().status !== 'done');
-      if (activeOrders.length >= 2) {
-        orderMsg.textContent = 'You can only have 2 active orders per day.';
+      const orderSnap2 = await db.collection('orders')
+        .where('userId', '==', user.email)
+        .where('timestamp', '>=', new Date(today + 'T00:00:00'))
+        .where('timestamp', '<=', new Date(today + 'T23:59:59'))
+        .get();
+      let mealsToday = 0;
+      const allDocs = [...orderSnap.docs, ...orderSnap2.docs];
+      const seen = new Set();
+      allDocs.forEach(doc => {
+        if (seen.has(doc.id)) return;
+        seen.add(doc.id);
+        const order = doc.data();
+        if (!order.done) {
+          if (order.items && Array.isArray(order.items)) {
+            order.items.forEach(item => { mealsToday += item.quantity || 1; });
+          } else if (order.quantity) {
+            mealsToday += order.quantity;
+          }
+        }
+      });
+      const cartMeals = Object.keys(cart).reduce((sum, k) => sum + (cart[k] || 0), 0);
+      if (mealsToday + cartMeals > 2) {
+        orderLimitMsg.textContent = 'Order limit reached: You can only order 2 meals per day.';
+        submitOrderBtn.style.display = 'none';
+        orderMsg.textContent = 'You can only order 2 meals per day.';
         orderMsg.style.color = 'red';
         return;
+      } else {
+        orderLimitMsg.textContent = '';
+        submitOrderBtn.style.display = '';
       }
       // Prepare items array
       const items = Object.keys(cart).filter(item => cart[item] > 0).map(item => ({
