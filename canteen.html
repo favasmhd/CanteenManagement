@@ -181,15 +181,16 @@
         snap.forEach(doc => {
           const order = doc.data();
           if (filterItem && order.itemName !== filterItem) return;
-          const status = order.status || 'pending';
-          let doneText = status === 'done' ? '<span style="color:green;">Done</span>' : '';
-          let paidText = status === 'paid' ? '<span style="color:green;">Paid</span>' : '';
-          let markDoneBtn = status !== 'done' ? `<button class='mark-done-btn' data-id='${doc.id}'>Mark Done</button>` : '';
-          let markPaidBtn = (order.paymentMethod === 'Cash' && status !== 'paid') ? `<button class='mark-paid-btn' data-id='${doc.id}'>Mark as Paid</button>` : '';
+          let doneText = order.done ? '<span style="color:green;">Done</span>' : '';
+          let paidText = order.paid ? '<span style="color:green;">Paid</span>' : '';
+          let markDoneBtn = !order.done ? `<button class='mark-done-btn' data-id='${doc.id}'>Mark Done</button>` : '';
+          let markPaidBtn = (order.paymentMethod === 'Cash' && !order.paid) ? `<button class='mark-paid-btn' data-id='${doc.id}'>Mark as Paid</button>` : '';
+          // If both paid and done, show only texts
+          if (order.paid && order.done) { markDoneBtn = ''; markPaidBtn = ''; }
           html += `<div class="order-item">
             <div class="order-info">
               <b>${order.itemName ? order.itemName.replace('Snacks-', 'Snacks (₹') : ''}${order.itemName && order.itemName.startsWith('Snacks') ? ')' : ''}</b> × ${order.quantity || 1}<br>
-              <small>${order.userEmail || ''}</small> | <small>${status}</small> | <small>${order.paymentMethod || ''}</small>
+              <small>${order.userEmail || ''}</small> | <small>${order.status || 'pending'}</small> | <small>${order.paymentMethod || ''}</small>
             </div>
             ${doneText} ${paidText} ${markDoneBtn} ${markPaidBtn}
           </div>`;
@@ -200,7 +201,7 @@
           btn.onclick = async function() {
             const id = btn.getAttribute('data-id');
             btn.disabled = true;
-            await db.collection('orders').doc(id).update({ status: 'done' });
+            await db.collection('orders').doc(id).update({ done: true });
             loadOrders();
           };
         });
@@ -209,7 +210,7 @@
           btn.onclick = async function() {
             const id = btn.getAttribute('data-id');
             btn.disabled = true;
-            await db.collection('orders').doc(id).update({ status: 'paid' });
+            await db.collection('orders').doc(id).update({ paid: true });
             loadOrders();
           };
         });
@@ -325,8 +326,8 @@
           html += `<div class="order-item" style="background:#f1f5f9;">
             <div class="order-info">
               <b>${name ? name : '(No Name)'}</b> <span style='color:#888;'>${email ? `| ${email}` : ''}</span> | <span style="color:#b91c1c;">Due: ₹${user.dueAmount || 0}</span>
-              <input type='number' min='0' max='${user.dueAmount || 0}' value='${user.dueAmount || 0}' class='reduce-due-input' data-id='${doc.id}' style='width:5em;margin-left:1em;' />
-              <button class="mark-paid-btn" data-id="${doc.id}" style="background:#22c55e;">Update</button>
+              <input type='number' min='0' max='${user.dueAmount || 0}' value='${user.dueAmount || 0}' class='reduce-due-input' data-id='${email}' style='width:5em;margin-left:1em;' />
+              <button class="mark-paid-btn" data-id="${email}" style="background:#22c55e;">Update</button>
             </div>
           </div>`;
         });
