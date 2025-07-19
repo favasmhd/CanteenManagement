@@ -101,7 +101,7 @@
     async function showDueAmountAndTransactions() {
       const user = auth.currentUser;
       if (!user) return;
-      const userRef = db.collection('users').doc(user.uid);
+      const userRef = db.collection('users').doc(user.email);
       let due = 0;
       let totalAmount = 0;
       try {
@@ -147,7 +147,7 @@
       const paymentMethod = 'UPI';
       const price = upiOrderPrice;
       const item = upiOrderItem;
-      const userRef = db.collection('users').doc(user.uid);
+      const userRef = db.collection('users').doc(user.email);
       let userData = { dueAmount: 0, maxDueLimit: MAX_DUE_LIMIT };
       try {
         const userSnap = await userRef.get();
@@ -162,7 +162,7 @@
         return;
       }
       const order = {
-        userId: user.uid,
+        userId: user.email,
         userEmail: user.email,
         itemName: item,
         quantity: 1,
@@ -241,7 +241,7 @@
       const paymentMethod = document.getElementById('paymentMethod').value;
       const totalPrice = items.reduce((sum, i) => sum + i.price * i.quantity, 0);
       // Due logic for Pay Later
-      const userRef = db.collection('users').doc(user.uid);
+      const userRef = db.collection('users').doc(user.email);
       let userData = { dueAmount: 0, maxDueLimit: MAX_DUE_LIMIT };
       try {
         const userSnap = await userRef.get();
@@ -269,10 +269,12 @@
       }
       // Place order
       const order = {
-        userId: user.uid,
+        userId: user.email,
         userEmail: user.email,
         items,
         status: paymentMethod === 'UPI' ? 'paid' : 'pending',
+        paid: paymentMethod === 'UPI',
+        done: false,
         timestamp: firebase.firestore.FieldValue.serverTimestamp(),
         paymentMethod,
         totalPrice
@@ -304,7 +306,7 @@
       upiPayBtn.onclick = async function() {
         const user = auth.currentUser;
         if (!user) return;
-        const userRef = db.collection('users').doc(user.uid);
+        const userRef = db.collection('users').doc(user.email);
         let userData = { dueAmount: 0, maxDueLimit: MAX_DUE_LIMIT };
         try {
           const userSnap = await userRef.get();
@@ -319,10 +321,12 @@
           return;
         }
         const order = {
-          userId: user.uid,
+          userId: user.email,
           userEmail: user.email,
           items,
           status: 'paid',
+          paid: true,
+          done: false,
           timestamp: firebase.firestore.FieldValue.serverTimestamp(),
           paymentMethod: 'UPI',
           totalPrice
@@ -365,7 +369,9 @@
             if (order.items && Array.isArray(order.items)) {
               order.items.forEach(item => {
                 if (item && item.itemName) {
-                  html += `<div class="order-item"><span>${item.itemName.replace('Snacks-', 'Snacks (₹')}${item.itemName.startsWith('Snacks') ? ')' : ''}</span><span>${item.quantity} × ₹${item.price}</span><span>${order.status || 'pending'}</span></div>`;
+                  let paidText = order.paid ? '<span style="color:green;">Paid</span>' : '';
+                  let doneText = order.done ? '<span style="color:green;">Done</span>' : '';
+                  html += `<div class="order-item"><span>${item.itemName.replace('Snacks-', 'Snacks (₹')}${item.itemName.startsWith('Snacks') ? ')' : ''}</span><span>${item.quantity} × ₹${item.price}</span>${paidText}${doneText}</div>`;
                 }
               });
             } else if (order.itemName) {
